@@ -9,6 +9,9 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Application", "src\Core\Application\Application.csproj", "{7B70EC15-934A-423F-AED5-FD02D72D3CE6}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{849D38CF-D12A-40B8-90D2-2E95020643F8}"
+	ProjectSection(SolutionItems) = preProject
+		src\Infrastructure\README.md = src\Infrastructure\README.md
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence", "src\Infrastructure\Persistence\Persistence.csproj", "{2DDC4556-6908-42E5-8A31-B669ED221184}"
 EndProject
