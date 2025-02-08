@@ -13,7 +13,8 @@ Bu framework aşağıdaki mimari prensipleri benimser:
 - Module Monolithic Architecture
 - Repository Pattern
 - Unit of Work Pattern
-- Specification Pattern
+- Strategy Pattern
+- Factory Pattern
 
 ## 📁 Proje Yapısı
 
@@ -25,6 +26,12 @@ src/
 ├── Infrastructure/
 │   ├── Persistence/     # Database context, migrations, repositories
 │   └── Infrastructure/  # Cross-cutting concerns, external services
+│       ├── Cache/       # Caching strategies (Redis, Memory, File)
+│       ├── MessageBroker/ # Message broker strategies (RabbitMQ, InMemory)
+│       ├── Email/       # Email strategies (SMTP, File)
+│       ├── Storage/     # Storage strategies (Local, Azure, AWS)
+│       ├── BackgroundJobs/ # Background job service (Hangfire)
+│       └── Logging/     # Logging service (Serilog)
 ├── Presentation/
 │   ├── API/            # REST API endpoints
 │   └── Web/            # MVC Web application
@@ -34,131 +41,216 @@ src/
     └── Functional/
 ```
 
-## 🚀 Başlangıç
+## 🚀 Infrastructure Servisleri
 
-### Gereksinimler
-- .NET 8 SDK
-- PostgreSQL (veya tercih edilen başka bir veritabanı)
-- Visual Studio 2022 / VS Code / Rider
+### Cache Service
+Üç farklı strateji ile cache yönetimi:
+```csharp
+// Servis registrasyonu
+services.AddCacheServices(options =>
+{
+    options.Strategy = CacheStrategy.Redis; // veya Memory, File
+    options.Redis = new RedisSettings
+    {
+        ConnectionString = "localhost:6379",
+        InstanceName = "MyApp:"
+    };
+});
 
-### Kurulum
+// Kullanım
+public class ProductService
+{
+    private readonly ICacheManager _cacheManager;
 
-1. Repository'yi klonlayın:
+    public async Task<Product> GetProductAsync(string id)
+    {
+        var cacheKey = $"product:{id}";
+        var product = await _cacheManager.GetAsync<Product>(cacheKey);
+        
+        if (product == null)
+        {
+            product = await _dbContext.Products.FindAsync(id);
+            await _cacheManager.SetAsync(cacheKey, product, TimeSpan.FromHours(1));
+        }
+        
+        return product;
+    }
+}
+```
+
+### Message Broker Service
+Event-driven mimari için mesajlaşma altyapısı:
+```csharp
+// Servis registrasyonu
+services.AddMessageBroker(options =>
+{
+    options.Strategy = MessageBrokerStrategy.RabbitMQ;
+    options.RabbitMQ = new RabbitMQSettings
+    {
+        HostName = "localhost",
+        UserName = "guest",
+        Password = "guest"
+    };
+});
+
+// Event publish etme
+await _messageBroker.PublishAsync("orders", new OrderCreatedEvent(orderId));
+
+// Event subscribe etme
+await _messageBroker.SubscribeAsync<OrderCreatedEvent>("orders", 
+    async (@event) => await ProcessOrderAsync(@event));
+```
+
+### Email Service
+SMTP ve dosya bazlı email gönderimi:
+```csharp
+// Servis registrasyonu
+services.AddEmailServices(options =>
+{
+    options.Strategy = EmailStrategy.Smtp;
+    options.Smtp = new SmtpSettings
+    {
+        Host = "smtp.gmail.com",
+        Port = 587,
+        UserName = "your@email.com",
+        Password = "your-password"
+    };
+});
+
+// Email gönderme
+var email = new EmailMessage
+{
+    To = { "user@example.com" },
+    Subject = "Welcome!",
+    Body = "Welcome to our platform."
+};
+
+await _emailManager.SendAsync(email);
+
+// Template ile email gönderme
+await _emailManager.SendTemplatedEmailAsync(
+    "WelcomeEmail",
+    new { UserName = "John" },
+    email);
+```
+
+### Storage Service
+Dosya depolama servisi:
+```csharp
+// Servis registrasyonu
+services.AddStorageServices(options =>
+{
+    options.Strategy = StorageStrategy.AzureBlob;
+    options.AzureBlob = new AzureBlobStorageSettings
+    {
+        ConnectionString = "your-connection-string",
+        ContainerName = "files"
+    };
+});
+
+// Dosya yükleme
+var fileModel = await _storageManager.UploadAsync(
+    stream,
+    "document.pdf",
+    "documents");
+
+// Dosya indirme
+var fileStream = await _storageManager.DownloadAsync(fileId);
+```
+
+### Background Job Service
+Hangfire ile arkaplan işleri:
+```csharp
+// Servis registrasyonu
+services.AddBackgroundJobs(configuration);
+app.UseBackgroundJobDashboard(configuration);
+
+// Job ekleme
+_jobService.Enqueue<IEmailJob>(
+    job => job.SendWelcomeEmailAsync(user.Email));
+
+// Zamanlanmış job
+_jobService.Schedule<IEmailJob>(
+    job => job.SendReminderEmail(user.Email),
+    TimeSpan.FromDays(7));
+
+// Recurring job
+_jobService.RecurringJob<ICleanupJob>(
+    "daily-cleanup",
+    job => job.CleanupAsync(),
+    "0 0 * * *");
+```
+
+### Logging Service
+Serilog tabanlı loglama:
+```csharp
+// Servis registrasyonu
+services.AddCustomLogging(configuration);
+app.UseRequestResponseLogging();
+
+// appsettings.json
+{
+  "Logging": {
+    "MinimumLevel": "Information",
+    "WriteToConsole": true,
+    "File": {
+      "Path": "logs/log-.txt",
+      "RollingInterval": "Day"
+    },
+    "Enricher": {
+      "ApplicationName": "MyApp",
+      "Environment": "Production"
+    }
+  }
+}
+
+// Kullanım
+_logger.LogInformation(
+    "User {UserId} performed {Action}",
+    user.Id,
+    "login");
+```
+
+## 🔧 Kurulum
+
+1. Repository'yi klonlayın
 ```bash
 git clone <repository-url>
 ```
 
-2. Veritabanını oluşturun:
+2. Gerekli paketleri yükleyin
+```bash
+dotnet restore
+```
+
+3. Veritabanını oluşturun
 ```bash
 cd src/Infrastructure/Persistence
 dotnet ef database update
 ```
 
-3. Uygulamayı çalıştırın:
+4. Uygulamayı çalıştırın
 ```bash
 cd src/Presentation/API
 dotnet run
 ```
 
-## 🛠️ Temel Özellikler
+## 📦 NuGet Paketleri
 
-### Domain Layer
-- Zengin domain modeli
-- Value Objects
-- Domain Events
-- Custom Exceptions
-- Specification Pattern implementasyonu
-
-### Application Layer
-- CQRS implementasyonu (MediatR)
-- Güçlü validation (FluentValidation)
-- Auto Mapping (AutoMapper)
-- Application Events
-
-### Infrastructure Layer
-- Generic Repository Pattern
-- Unit of Work Pattern
-- Event Bus implementasyonu
-- Caching mekanizması
-- Logging altyapısı
-- Email service
-- File storage service
-
-### Cross-Cutting Concerns
-- Exception Handling
-- Validation
-- Logging
-- Caching
-- Authentication & Authorization
-- Audit Trailing
-
-## 📦 Kullanılan Paketler
-
-### Domain Layer
+### Core
 - MediatR
-
-### Application Layer
-- AutoMapper
 - FluentValidation
-- MediatR
-- Microsoft.Extensions.DependencyInjection
 
-### Infrastructure Layer
+### Infrastructure
 - Microsoft.EntityFrameworkCore
 - Npgsql.EntityFrameworkCore.PostgreSQL
-- Microsoft.Extensions.Configuration
-- Microsoft.Extensions.DependencyInjection
-- Serilog
 - StackExchange.Redis
 - RabbitMQ.Client
-
-### API Layer
-- Microsoft.AspNetCore.Authentication.JwtBearer
-- Swashbuckle.AspNetCore
-- Microsoft.AspNetCore.Mvc.Versioning
-
-## 🔧 Konfigürasyon
-
-`appsettings.json` dosyasında aşağıdaki ayarları yapılandırabilirsiniz:
-
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Database=YourDb;Username=user;Password=pass"
-  },
-  "Redis": {
-    "ConnectionString": "localhost:6379"
-  },
-  "EventBus": {
-    "HostName": "localhost",
-    "UserName": "guest",
-    "Password": "guest"
-  }
-}
-```
-
-## 📋 Best Practices
-
-### Domain Modelleme
-- Aggregate Roots tanımlayın
-- Entity'ler için behavior-rich modeller kullanın
-- Value Objects kullanarak domain logic'i encapsulate edin
-- Domain Events ile loosely coupled yapı oluşturun
-
-### Repository Kullanımı
-- Generic Repository pattern
-- Specification pattern ile query logic'i encapsulate edin
-- Unit of Work pattern ile transaction yönetimi
-
-### Validation
-- FluentValidation ile domain validation
-- Custom validation rules
-- Cross-field validation
-
-### Error Handling
-- Domain Exceptions
-- Global exception handling
-- Custom exception middleware
+- MailKit
+- Azure.Storage.Blobs
+- AWSSDK.S3
+- Hangfire
+- Serilog
 
 ## 🤝 Katkıda Bulunma
 
