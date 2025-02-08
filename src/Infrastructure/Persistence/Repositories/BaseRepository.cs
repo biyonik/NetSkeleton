@@ -12,25 +12,19 @@ namespace Persistence.Repositories;
 /// </summary>
 /// <typeparam name="T">Entity tipi</typeparam>
 /// <typeparam name="TKey">Entity'nin primary key tipi</typeparam>
-public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, TKey> 
-    where T : BaseEntity<TKey> 
+public class BaseRepository<T, TKey>(ApplicationDbContext context) : IRepository<T, TKey>, IReadRepository<T, TKey>
+    where T : BaseEntity<TKey>
     where TKey : struct
 {
-    protected readonly ApplicationDbContext _context;
-    protected readonly DbSet<T> _dbSet;
-
-    public BaseRepository(ApplicationDbContext context)
-    {
-        _context = context;
-        _dbSet = context.Set<T>();
-    }
+    protected readonly ApplicationDbContext Context = context;
+    protected readonly DbSet<T> DbSet = context.Set<T>();
 
     /// <summary>
     /// Entity'yi ID ile getirir
     /// </summary>
     public virtual async Task<T?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        return await _dbSet.FindAsync(new object[] { id }, cancellationToken);
+        return await DbSet.FindAsync([id], cancellationToken);
     }
 
     /// <summary>
@@ -46,7 +40,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     public virtual async Task<List<T>> ListAllAsync(CancellationToken cancellationToken = default)
     {
-        return await _dbSet.ToListAsync(cancellationToken);
+        return await DbSet.ToListAsync(cancellationToken);
     }
 
     /// <summary>
@@ -62,7 +56,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     public virtual async Task<T> AddAsync(T entity, CancellationToken cancellationToken = default)
     {
-        await _dbSet.AddAsync(entity, cancellationToken);
+        await DbSet.AddAsync(entity, cancellationToken);
         return entity;
     }
 
@@ -71,7 +65,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     public virtual async Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
     {
-        _context.Entry(entity).State = EntityState.Modified;
+        Context.Entry(entity).State = EntityState.Modified;
         await Task.CompletedTask;
     }
 
@@ -80,7 +74,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     public virtual async Task DeleteAsync(T entity, CancellationToken cancellationToken = default)
     {
-        _dbSet.Remove(entity);
+        DbSet.Remove(entity);
         await Task.CompletedTask;
     }
 
@@ -89,7 +83,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     public virtual async Task<int> CountAsync(ISpecification<T> specification, CancellationToken cancellationToken = default)
     {
-        return await SpecificationEvaluator<T>.CountAsync(_dbSet.AsQueryable(), specification);
+        return await SpecificationEvaluator<T>.CountAsync(DbSet.AsQueryable(), specification);
     }
 
     /// <summary>
@@ -105,7 +99,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     protected virtual IQueryable<T> AsNoTracking()
     {
-        return _dbSet.AsNoTracking();
+        return DbSet.AsNoTracking();
     }
 
     /// <summary>
@@ -113,7 +107,7 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     protected virtual IQueryable<T> ApplySpecification(ISpecification<T> specification)
     {
-        return SpecificationEvaluator<T>.GetQuery(_dbSet.AsQueryable(), specification);
+        return SpecificationEvaluator<T>.GetQuery(DbSet.AsQueryable(), specification);
     }
 
     /// <summary>
@@ -121,6 +115,6 @@ public class BaseRepository<T, TKey> : IRepository<T, TKey>, IReadRepository<T, 
     /// </summary>
     protected virtual IQueryable<T> ApplySpecificationAsNoTracking(ISpecification<T> specification)
     {
-        return SpecificationEvaluator<T>.GetQuery(_dbSet.AsNoTracking(), specification);
+        return SpecificationEvaluator<T>.GetQuery(DbSet.AsNoTracking(), specification);
     }
 }
