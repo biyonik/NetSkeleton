@@ -1,3 +1,5 @@
+using System.Security.Claims;
+
 namespace Infrastructure.Identity.Services;
 
 /// <summary>
@@ -24,6 +26,11 @@ public interface ICurrentUserService
     /// Aktif kullanıcının rolleri
     /// </summary>
     IEnumerable<string> Roles { get; }
+
+    /// <summary>
+    /// Aktif kullanıcının claims'leri
+    /// </summary>
+    ClaimsPrincipal User { get; }
 
     /// <summary>
     /// Kullanıcının belirli bir role sahip olup olmadığını kontrol eder

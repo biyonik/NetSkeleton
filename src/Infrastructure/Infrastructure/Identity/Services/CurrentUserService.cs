@@ -9,7 +9,7 @@ namespace Infrastructure.Identity.Services;
 public class CurrentUserService : ICurrentUserService
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
-    private ClaimsPrincipal? User => _httpContextAccessor.HttpContext?.User;
+    public ClaimsPrincipal? User => _httpContextAccessor.HttpContext?.User;
 
     public CurrentUserService(IHttpContextAccessor httpContextAccessor)
     {
