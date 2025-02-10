@@ -38,8 +38,8 @@ public class RazorTemplateRenderer(
         // View context oluştur
         var httpContext = new DefaultHttpContext { RequestServices = serviceProvider };
         var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
-        
-        using var writer = new StringWriter();
+
+        await using var writer = new StringWriter();
         var viewContext = new ViewContext(
             actionContext,
             viewResult.View,

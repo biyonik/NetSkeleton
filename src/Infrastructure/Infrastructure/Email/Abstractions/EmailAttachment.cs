@@ -13,7 +13,7 @@ public class EmailAttachment
     /// <summary>
     /// Dosya içeriği
     /// </summary>
-    public byte[] Content { get; set; } = Array.Empty<byte>();
+    public byte[] Content { get; set; } = [];
 
     /// <summary>
     /// MIME tipi

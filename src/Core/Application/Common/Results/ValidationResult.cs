@@ -5,13 +5,13 @@ namespace Application.Common.Results;
 /// </summary>
 public class ValidationResult : Result
 {
-    public IReadOnlyList<ValidationError> Errors { get; }
+    public Dictionary<string, List<string>> Errors { get; }
 
-    private ValidationResult(IReadOnlyList<ValidationError> errors)
-        : base(false, Error.Validation, "Validation failed")
+    internal ValidationResult(Dictionary<string, List<string>> errors)
+        : base(false, Error.Validation(errors), "Validation failed")
     {
         Errors = errors;
     }
 
-    public static ValidationResult WithErrors(IReadOnlyList<ValidationError> errors) => new(errors);
+    public static ValidationResult WithErrors(Dictionary<string, List<string>> errors) => new(errors);
 }

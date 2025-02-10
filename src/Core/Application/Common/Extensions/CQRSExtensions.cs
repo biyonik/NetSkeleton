@@ -31,6 +31,11 @@ public static class CQRSExtensions
 
         // Validator'ları register et
         services.AddValidatorsFromAssembly(assembly);
+        
+        services.AddAutoMapper(config => 
+        {
+            config.AddMaps(Assembly.GetExecutingAssembly());
+        });
 
         // CQRS Dispatcher'ı register et
         services.AddScoped<ICQRSDispatcher, CQRSDispatcher>();

@@ -1,8 +1,12 @@
 using System.Linq.Expressions;
+using Application.Authorization.Services;
+using Domain.Authorization;
 using Domain.Common.Abstractions;
 using Domain.Common.Audit;
-using Infrastructure.Identity.Services;
+using Domain.Identity.Models;
 using MediatR;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace Persistence.Context;
@@ -10,45 +14,49 @@ namespace Persistence.Context;
 /// <summary>
 /// Ana veritabanı context sınıfı
 /// </summary>
-public class ApplicationDbContext : DbContext
+public class ApplicationDbContext(
+    DbContextOptions<ApplicationDbContext> options,
+    IMediator mediator,
+    ICurrentUserService currentUserService)
+    : IdentityDbContext<
+        ApplicationUser,
+        ApplicationRole,
+        Guid,
+        ApplicationUserClaim,
+        ApplicationUserRole,
+        IdentityUserLogin<Guid>,
+        ApplicationRoleClaim,
+        IdentityUserToken<Guid>>(options: options)
 {
-    private readonly IMediator _mediator;
-    private readonly ICurrentUserService _currentUserService;
-
     /// <summary>
     /// Audit logları için DbSet
     /// </summary>
     public DbSet<AuditTrail> AuditTrails => Set<AuditTrail>();
 
-    public ApplicationDbContext(
-        DbContextOptions<ApplicationDbContext> options,
-        IMediator mediator,
-        ICurrentUserService currentUserService) 
-        : base(options)
-    {
-        _mediator = mediator;
-        _currentUserService = currentUserService;
-    }
+    public DbSet<PermissionEndpoint> PermissionEndpoints { get; set; }
+
+
+    public DbSet<Permission> Permissions { get; set; }
+    public DbSet<PermissionGrant> PermissionGrants { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Tüm configuration'ları otomatik olarak register et
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
-
+        
         // Soft delete için global query filter
         foreach (var entityType in modelBuilder.Model.GetEntityTypes())
         {
             // Entity tipi BaseEntity'den türemiş mi kontrol et
-            if (typeof(BaseEntity<>).IsAssignableFrom(entityType.ClrType))
-            {
-                // Soft delete filter'ı ekle
-                var parameter = Expression.Parameter(entityType.ClrType, "p");
-                var property = Expression.Property(parameter, "IsDeleted");
-                var falseConstant = Expression.Constant(false);
-                var lambda = Expression.Lambda(Expression.Equal(property, falseConstant), parameter);
+            if (!typeof(BaseEntity<>).IsAssignableFrom(entityType.ClrType)) continue;
+            
+            // Soft delete filter'ı ekle
+            var parameter = Expression.Parameter(entityType.ClrType, "p");
+            var property = Expression.Property(parameter, "IsDeleted");
+            var falseConstant = Expression.Constant(false);
+            var lambda = Expression.Lambda(Expression.Equal(property, falseConstant), parameter);
 
-                modelBuilder.Entity(entityType.ClrType).HasQueryFilter(lambda);
-            }
+            modelBuilder.Entity(entityType.ClrType).HasQueryFilter(lambda);
         }
 
         base.OnModelCreating(modelBuilder);
@@ -80,7 +88,7 @@ public class ApplicationDbContext : DbContext
     /// <summary>
     /// SaveChanges öncesi işlemler
     /// </summary>
-    private async Task<List<AuditEntry>> OnBeforeSaveChanges()
+    private Task<List<AuditEntry>?> OnBeforeSaveChanges()
     {
         ChangeTracker.DetectChanges();
         var auditEntries = new List<AuditEntry>();
@@ -93,7 +101,7 @@ public class ApplicationDbContext : DbContext
             var auditEntry = new AuditEntry(entry)
             {
                 TableName = entry.Entity.GetType().Name,
-                UserId = _currentUserService.UserId
+                UserId = currentUserService.UserId
             };
             auditEntries.Add(auditEntry);
 
@@ -112,17 +120,17 @@ public class ApplicationDbContext : DbContext
                     continue;
                 }
 
-                switch (entry.State)
+                switch (entry)
                 {
-                    case EntityState.Added:
+                    case { State: EntityState.Added }:
                         auditEntry.NewValues[propertyName] = property.CurrentValue;
                         break;
 
-                    case EntityState.Deleted:
+                    case { State: EntityState.Deleted }:
                         auditEntry.OldValues[propertyName] = property.OriginalValue;
                         break;
 
-                    case EntityState.Modified:
+                    case { State: EntityState.Modified }:
                         if (property.IsModified)
                         {
                             auditEntry.OldValues[propertyName] = property.OriginalValue;
@@ -130,19 +138,24 @@ public class ApplicationDbContext : DbContext
                             auditEntry.ChangedColumns.Add(propertyName);
                         }
                         break;
+                    case { State: EntityState.Detached }:
+                    case { State: EntityState.Unchanged }:
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
                 }
             }
         }
 
-        return auditEntries;
+        return Task.FromResult<List<AuditEntry>?>(auditEntries);
     }
 
     /// <summary>
     /// SaveChanges sonrası işlemler
     /// </summary>
-    private async Task OnAfterSaveChanges(List<AuditEntry> auditEntries)
+    private async Task OnAfterSaveChanges(List<AuditEntry>? auditEntries)
     {
-        if (auditEntries == null || !auditEntries.Any())
+        if (auditEntries == null || auditEntries.Count == 0)
             return;
 
         foreach (var auditEntry in auditEntries)
@@ -171,7 +184,7 @@ public class ApplicationDbContext : DbContext
     {
         var domainEvents = ChangeTracker.Entries<BaseEntity<Guid>>()
             .Select(x => x.Entity)
-            .Where(x => x.DomainEvents.Any())
+            .Where(x => x.DomainEvents.Count != 0)
             .SelectMany(x => x.DomainEvents)
             .ToList();
 
@@ -185,7 +198,7 @@ public class ApplicationDbContext : DbContext
     {
         foreach (var domainEvent in domainEvents)
         {
-            await _mediator.Publish(domainEvent);
+            await mediator.Publish(domainEvent);
         }
     }
 }

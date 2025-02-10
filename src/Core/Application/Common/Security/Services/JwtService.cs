@@ -4,12 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 using Application.Common.Security.Response;
 using Application.Common.Security.Settings;
-using Infrastructure.Identity.Models;
+using Domain.Authorization.Repositories;
+using Domain.Identity.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using SecurityTokenException = Application.Common.Security.Exceptions.SecurityTokenException;
 
 namespace Application.Common.Security.Services;
 
@@ -19,36 +19,31 @@ namespace Application.Common.Security.Services;
 public class JwtService : IJwtService
 {
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IAuthorizationRepository _authorizationRepository;
     private readonly JwtSettings _jwtSettings;
     private readonly ILogger<JwtService> _logger;
 
     public JwtService(
         UserManager<ApplicationUser> userManager,
+        IAuthorizationRepository authorizationRepository,
         IOptions<JwtSettings> jwtSettings,
         ILogger<JwtService> logger)
     {
         _userManager = userManager;
+        _authorizationRepository = authorizationRepository;
         _jwtSettings = jwtSettings.Value;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Kullanıcı için token üretir
-    /// </summary>
     public async Task<TokenResponse> GenerateTokenAsync(ApplicationUser user)
     {
         try
         {
-            // Claims oluştur
-            var claims = await GetClaimsAsync(user);
-            
-            // Access token üret
+            var claims = await GetUserClaimsAsync(user);
             var accessToken = GenerateAccessToken(claims);
-            
-            // Refresh token üret
             var refreshToken = GenerateRefreshToken();
-            
-            // Kullanıcıya refresh token'ı kaydet
+
+            // Refresh token'ı kullanıcıya kaydet
             user.RefreshToken = refreshToken;
             user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationInDays);
             await _userManager.UpdateAsync(user);
@@ -58,19 +53,16 @@ public class JwtService : IJwtService
                 AccessToken = accessToken,
                 RefreshToken = refreshToken,
                 AccessTokenExpiration = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationInMinutes),
-                RefreshTokenExpiration = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationInDays)
+                RefreshTokenExpiration = user.RefreshTokenExpiryTime.Value
             };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating token for user {UserId}", user.Id);
-            throw;
+            throw new SecurityTokenException("Token generation failed", ex);
         }
     }
 
-    /// <summary>
-    /// Refresh token ile yeni token üretir
-    /// </summary>
     public async Task<TokenResponse> RefreshTokenAsync(string accessToken, string refreshToken)
     {
         try
@@ -81,22 +73,23 @@ public class JwtService : IJwtService
 
             var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
             var user = await _userManager.FindByIdAsync(userId);
-            
-            if (user == null || user.RefreshToken != refreshToken || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
-                throw new SecurityTokenException("Invalid refresh token");
+
+            if (user == null || 
+                user.RefreshToken != refreshToken || 
+                user.RefreshTokenExpiryTime <= DateTime.UtcNow)
+            {
+                throw new SecurityTokenException("Invalid or expired refresh token");
+            }
 
             return await GenerateTokenAsync(user);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error refreshing token");
-            throw;
+            throw new SecurityTokenException("Token refresh failed", ex);
         }
     }
 
-    /// <summary>
-    /// Kullanıcının refresh token'ını iptal eder
-    /// </summary>
     public async Task RevokeTokenAsync(string userId)
     {
         try
@@ -107,92 +100,94 @@ public class JwtService : IJwtService
             user.RefreshToken = null;
             user.RefreshTokenExpiryTime = null;
             await _userManager.UpdateAsync(user);
+
+            // Kullanıcının permission cache'ini temizle
+            await _authorizationRepository.InvalidateUserPermissionCacheAsync(userId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error revoking token for user {UserId}", userId);
-            throw;
+            throw new SecurityTokenException("Token revocation failed", ex);
         }
     }
 
-    /// <summary>
-    /// Süresi geçmiş token'dan principal bilgisini çıkarır
-    /// </summary>
     public ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
     {
         var tokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
-            ValidateLifetime = false, // Süresi geçmiş token'ı kabul et
+            ValidateLifetime = false,
             ValidateIssuerSigningKey = true,
             ValidIssuer = _jwtSettings.Issuer,
             ValidAudience = _jwtSettings.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret)),
+            ClockSkew = TimeSpan.Zero // Daha kesin zaman kontrolü için
         };
 
         var tokenHandler = new JwtSecurityTokenHandler();
-        var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
-
-        if (securityToken is not JwtSecurityToken jwtSecurityToken || 
-            !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, 
-                StringComparison.InvariantCultureIgnoreCase))
+        
+        try
         {
-            throw new SecurityTokenException("Invalid token");
-        }
+            var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
 
-        return principal;
+            if (securityToken is not JwtSecurityToken jwtSecurityToken || 
+                !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, 
+                    StringComparison.InvariantCultureIgnoreCase))
+            {
+                throw new SecurityTokenException("Invalid token algorithm");
+            }
+
+            return principal;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Token validation failed");
+            return null;
+        }
     }
 
-    /// <summary>
-    /// Access token üretir
-    /// </summary>
     private string GenerateAccessToken(IEnumerable<Claim> claims)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var now = DateTime.UtcNow;
 
         var token = new JwtSecurityToken(
             issuer: _jwtSettings.Issuer,
             audience: _jwtSettings.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationInMinutes),
+            notBefore: now,
+            expires: now.AddMinutes(_jwtSettings.AccessTokenExpirationInMinutes),
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    /// <summary>
-    /// Refresh token üretir
-    /// </summary>
     private static string GenerateRefreshToken()
     {
-        var randomNumber = new byte[64];
+        var randomBytes = new byte[64];
         using var rng = RandomNumberGenerator.Create();
-        rng.GetBytes(randomNumber);
-        return Convert.ToBase64String(randomNumber);
+        rng.GetBytes(randomBytes);
+        return Convert.ToBase64String(randomBytes);
     }
 
-    /// <summary>
-    /// Kullanıcı için claims listesi oluşturur
-    /// </summary>
-    private async Task<List<Claim>> GetClaimsAsync(ApplicationUser user)
+    private async Task<List<Claim>> GetUserClaimsAsync(ApplicationUser user)
     {
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.UserName),
             new(ClaimTypes.Email, user.Email),
-            new("fullName", user.FullName)
+            new(ClaimTypes.GivenName, user.FirstName),
+            new(ClaimTypes.Surname, user.LastName)
         };
 
-        // Rolleri ekle
-        var roles = await _userManager.GetRolesAsync(user);
-        claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
+        // Kullanıcının permission'larını al
+        var permissions = await _authorizationRepository
+            .GetUserPermissionSystemNamesAsync(user.Id.ToString());
 
-        // Permission'ları ekle
-        var permissions = await _userManager.GetClaimsAsync(user);
-        claims.AddRange(permissions.Where(x => x.Type == "Permission"));
+        claims.AddRange(permissions.Select(p => new Claim("Permission", p)));
 
         return claims;
     }

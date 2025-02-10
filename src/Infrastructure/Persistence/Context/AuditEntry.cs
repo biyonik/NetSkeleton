@@ -13,9 +13,9 @@ public class AuditEntry
     public EntityEntry Entry { get; }
     public string TableName { get; set; }
     public string UserId { get; set; }
-    public Dictionary<string, object> KeyValues { get; } = new();
-    public Dictionary<string, object> OldValues { get; } = new();
-    public Dictionary<string, object> NewValues { get; } = new();
+    public Dictionary<string, object?> KeyValues { get; } = new();
+    public Dictionary<string, object?> OldValues { get; } = new();
+    public Dictionary<string, object?> NewValues { get; } = new();
     public List<PropertyEntry> TemporaryProperties { get; } = new();
     public List<string> ChangedColumns { get; } = new();
 

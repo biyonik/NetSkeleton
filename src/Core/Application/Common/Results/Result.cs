@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Application.Common.Results;
 
 /// <summary>
@@ -35,19 +37,27 @@ public class Result
 /// <summary>
 /// Generic result sınıfı
 /// </summary>
-public class Result<T> : Result
+[method: JsonConstructor]
+public class Result<T>(T? value, bool isSuccess, Error error, string message)
+    : Result(isSuccess, error, message)
 {
-    private readonly T? _value;
-
+    [JsonIgnore]
     public T Value => IsSuccess
-        ? _value!
+        ? value!
         : throw new InvalidOperationException("Value of a failure result can't be accessed.");
 
-    protected internal Result(T? value, bool isSuccess, Error error, string message)
-        : base(isSuccess, error, message)
-    {
-        _value = value;
-    }
+    [JsonPropertyName("value")]
+    public T? SerializableValue => IsSuccess ? value : default;
+
+    [JsonPropertyName("isSuccess")]
+    public new bool IsSuccess => base.IsSuccess;
+
+    [JsonPropertyName("error")]
+    public new Error Error => base.Error;
+
+    [JsonPropertyName("message")]
+    public new string Message => base.Message;
+
 
     public static Result<T> Success(T value, string message = "") =>
         new(value, true, Error.None, message);

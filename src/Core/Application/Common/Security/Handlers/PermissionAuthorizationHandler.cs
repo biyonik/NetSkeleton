@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Application.Common.Security.Authorization;
+using Domain.Authorization.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 
@@ -8,60 +9,64 @@ namespace Application.Common.Security.Handlers;
 /// <summary>
 /// Permission bazlı yetkilendirme handler'ı
 /// </summary>
-public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandler> logger)
+public class PermissionAuthorizationHandler(
+    IAuthorizationRepository authorizationRepository,
+    ILogger<PermissionAuthorizationHandler> logger)
     : AuthorizationHandler<PermissionRequirement>
 {
-    protected override Task HandleRequirementAsync(
+    protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
         try
         {
             var user = context.User;
-
             if (!user.Identity?.IsAuthenticated ?? true)
             {
                 logger.LogWarning("User is not authenticated");
-                return Task.CompletedTask;
+                return;
             }
 
-            // Super admin her zaman erişebilir
-            if (user.IsInRole("SuperAdmin"))
+            var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
             {
-                context.Succeed(requirement);
-                return Task.CompletedTask;
+                logger.LogWarning("User ID claim not found");
+                return;
             }
 
-            // Kullanıcının permission'larını kontrol et
-            var userPermissions = user.Claims
-                .Where(c => c.Type == "Permission")
-                .Select(c => c.Value)
-                .ToArray();
+            // Tüm permission'ları kontrol et
+            var hasAllPermissions = true;
+            foreach (var permissionName in requirement.PermissionSystemNames)
+            {
+                var hasPermission = await authorizationRepository.HasPermissionAsync(
+                    userId, permissionName);
 
-            var hasAllPermissions = requirement.Permissions
-                .All(permission => userPermissions.Contains(permission));
+                if (!hasPermission)
+                {
+                    hasAllPermissions = false;
+                    break;
+                }
+            }
 
             if (hasAllPermissions)
             {
                 context.Succeed(requirement);
                 logger.LogInformation(
                     "User {UserId} authorized with permissions: {Permissions}",
-                    user.FindFirstValue(ClaimTypes.NameIdentifier),
-                    string.Join(", ", requirement.Permissions));
+                    userId,
+                    string.Join(", ", requirement.PermissionSystemNames));
             }
             else
             {
                 logger.LogWarning(
                     "User {UserId} does not have required permissions: {Permissions}",
-                    user.FindFirstValue(ClaimTypes.NameIdentifier),
-                    string.Join(", ", requirement.Permissions));
+                    userId,
+                    string.Join(", ", requirement.PermissionSystemNames));
             }
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error in permission authorization");
         }
-
-        return Task.CompletedTask;
     }
 }

@@ -1,6 +1,6 @@
+using Application.Authorization.Services;
 using Application.Common.Security.Exceptions;
 using Castle.DynamicProxy;
-using Infrastructure.Identity.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Application.Common.Aspects;

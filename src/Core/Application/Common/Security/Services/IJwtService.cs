@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using Application.Common.Security.Response;
-using Infrastructure.Identity.Models;
+using Domain.Identity.Models;
 
 namespace Application.Common.Security.Services;
 

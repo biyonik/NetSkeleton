@@ -22,7 +22,7 @@ public static class EmailServiceExtensions
 
         // Factory ve Manager'ı register et
         services.AddSingleton<IEmailStrategyFactory, EmailStrategyFactory>();
-        services.AddSingleton<IEmailManager, EmailManager>();
+        services.AddScoped<IEmailManager, EmailManager>();
 
         // Template renderer'ı register et
         services.AddScoped<ITemplateRenderer, RazorTemplateRenderer>();

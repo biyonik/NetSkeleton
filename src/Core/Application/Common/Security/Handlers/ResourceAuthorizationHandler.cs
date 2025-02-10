@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Application.Common.Security.Authorization;
+using Domain.Authorization.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 
@@ -8,58 +9,81 @@ namespace Application.Common.Security.Handlers;
 /// <summary>
 /// Resource bazlı yetkilendirme handler'ı
 /// </summary>
-public class ResourceAuthorizationHandler(ILogger<ResourceAuthorizationHandler> logger)
+public class ResourceAuthorizationHandler(
+    IAuthorizationRepository authorizationRepository,
+    ILogger<ResourceAuthorizationHandler> logger)
     : AuthorizationHandler<ResourceOperationRequirement>
 {
-    protected override Task HandleRequirementAsync(
+    protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         ResourceOperationRequirement requirement)
     {
         try
         {
             var user = context.User;
-
             if (!user.Identity?.IsAuthenticated ?? true)
             {
                 logger.LogWarning("User is not authenticated");
-                return Task.CompletedTask;
+                return;
             }
 
-            // Super admin her zaman erişebilir
-            if (user.IsInRole("SuperAdmin"))
+            var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
             {
-                context.Succeed(requirement);
-                return Task.CompletedTask;
+                logger.LogWarning("User ID claim not found");
+                return;
             }
 
-            // Resource bazlı permission'ı kontrol et
-            var resourcePermission = $"{requirement.Resource}.{requirement.Operation}";
-            var hasPermission = user.Claims
-                .Any(c => c.Type == "Permission" && c.Value == resourcePermission);
+            var hasAccess = await authorizationRepository.CanAccessResourceAsync(
+                userId, 
+                requirement.Resource, 
+                requirement.Operation);
 
-            if (hasPermission)
+            if (hasAccess)
             {
                 context.Succeed(requirement);
                 logger.LogInformation(
                     "User {UserId} authorized for resource {Resource} operation {Operation}",
-                    user.FindFirstValue(ClaimTypes.NameIdentifier),
+                    userId,
                     requirement.Resource,
                     requirement.Operation);
             }
             else
             {
-                logger.LogWarning(
-                    "User {UserId} does not have permission for resource {Resource} operation {Operation}",
-                    user.FindFirstValue(ClaimTypes.NameIdentifier),
-                    requirement.Resource,
-                    requirement.Operation);
+                // Context varsa, detaylı kontrol yap
+                if (requirement.Context != null)
+                {
+                    var (hasContextAccess, reason) = await authorizationRepository.EvaluateAccessAsync(
+                        userId,
+                        $"{requirement.Resource}.{requirement.Operation}",
+                        System.Text.Json.JsonSerializer.Serialize(requirement.Context));
+
+                    if (hasContextAccess)
+                    {
+                        context.Succeed(requirement);
+                        return;
+                    }
+
+                    logger.LogWarning(
+                        "User {UserId} access denied for resource {Resource} operation {Operation}. Reason: {Reason}",
+                        userId,
+                        requirement.Resource,
+                        requirement.Operation,
+                        reason);
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "User {UserId} does not have permission for resource {Resource} operation {Operation}",
+                        userId,
+                        requirement.Resource,
+                        requirement.Operation);
+                }
             }
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error in resource authorization");
         }
-
-        return Task.CompletedTask;
     }
 }

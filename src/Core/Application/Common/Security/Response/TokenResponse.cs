@@ -1,3 +1,5 @@
+using Application.Common.Results;
+
 namespace Application.Common.Security.Response;
 
 /// <summary>

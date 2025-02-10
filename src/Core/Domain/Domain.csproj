@@ -8,15 +8,12 @@
 
     <ItemGroup>
       <Folder Include="Aggregates\" />
-      <Folder Include="Common\Behaviors\" />
-      <Folder Include="Common\Constants\" />
-      <Folder Include="Common\Extensions\" />
-      <Folder Include="Shared\" />
-      <Folder Include="Specifications\" />
+      <Folder Include="Identity\" />
     </ItemGroup>
 
     <ItemGroup>
       <PackageReference Include="MediatR" Version="12.4.1" />
+      <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.11" />
     </ItemGroup>
 
     <ItemGroup>

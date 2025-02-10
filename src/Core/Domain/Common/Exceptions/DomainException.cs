@@ -4,7 +4,7 @@ namespace Domain.Common.Exceptions;
 /// Domain katmanı için temel exception sınıfı.
 /// Tüm domain-specific exception'lar bu sınıftan türetilmelidir.
 /// </summary>
-public abstract class DomainException : Exception
+public class DomainException : Exception
 {
     /// <summary>
     /// Exception'ın tipi
@@ -16,13 +16,13 @@ public abstract class DomainException : Exception
     /// </summary>
     public DateTime OccurredOn { get; }
 
-    protected DomainException(string message) 
+    protected internal DomainException(string message) 
         : base(message)
     {
         OccurredOn = DateTime.UtcNow;
     }
 
-    protected DomainException(string message, Exception innerException) 
+    protected internal DomainException(string message, Exception innerException) 
         : base(message, innerException)
     {
         OccurredOn = DateTime.UtcNow;

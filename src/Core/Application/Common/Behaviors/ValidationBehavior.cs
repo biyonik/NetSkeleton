@@ -14,15 +14,13 @@ public class ValidationBehavior<TRequest, TResponse>(
     : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
-    public async Task<TResponse> Handle(
+    public async Task<TResponse?> Handle(
         TRequest request,
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
         if (!validators.Any())
             return await next();
-
-        logger.LogInformation("Validating request {RequestType}", typeof(TRequest).Name);
 
         var context = new ValidationContext<TRequest>(request);
         var validationResults = await Task.WhenAll(
@@ -36,19 +34,43 @@ public class ValidationBehavior<TRequest, TResponse>(
         if (failures.Count == 0)
             return await next();
 
-        logger.LogWarning("Validation failed for {RequestType}. Errors: {@ValidationErrors}",
-            typeof(TRequest).Name, failures);
+        logger.LogWarning(
+            "Validation failed for {RequestType}. Errors: {@ValidationErrors}",
+            typeof(TRequest).Name, 
+            failures);
 
-        var errors = failures
-            .Select(failure => new ValidationError(failure.PropertyName, failure.ErrorMessage))
-            .ToList();
-
-        if (typeof(TResponse).IsGenericType &&
+        if (typeof(TResponse).IsGenericType && 
             typeof(TResponse).GetGenericTypeDefinition() == typeof(Result<>))
         {
-            var resultType = typeof(TResponse).GetGenericArguments()[0];
-            var validationResult = ValidationResult.WithErrors(errors);
-            return (TResponse)Convert.ChangeType(validationResult, typeof(TResponse));
+            var type = typeof(TResponse).GetGenericArguments()[0];
+    
+            var validationErrors = failures
+                .GroupBy(f => f.PropertyName)
+                .ToDictionary(
+                    g => g.Key, 
+                    g => g.Select(f => f.ErrorMessage).ToList()
+                );
+    
+            var error = Error.Validation(validationErrors);
+    
+            return (TResponse)typeof(Result)
+                .GetMethod(nameof(Result.Failure), 1, new[] { typeof(Error) })
+                .MakeGenericMethod(type)
+                .Invoke(null, new object[] { error });
+        }
+
+        // Normal Result tipinde ise
+        if (typeof(TResponse) == typeof(Result))
+        {
+            var validationErrors = failures
+                .GroupBy(f => f.PropertyName)
+                .ToDictionary(
+                    g => g.Key, 
+                    g => g.Select(f => f.ErrorMessage).ToList()
+                );
+   
+            var error = Error.Validation(validationErrors);
+            return (TResponse)(object)Result.Failure(error);
         }
 
         throw new ValidationException("Validation failed", failures);

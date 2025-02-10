@@ -40,6 +40,7 @@ public abstract class BaseSpecification<T> : ISpecification<T>
         Criteria = criteria;
     }
 
+
     /// <summary>
     /// Navigation property'leri include etmek için kullanılır
     /// </summary>

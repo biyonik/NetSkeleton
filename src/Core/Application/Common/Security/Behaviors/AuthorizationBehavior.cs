@@ -1,17 +1,20 @@
 using System.Reflection;
+using Application.Authorization.Services;
+using Application.Common.Security.Attributes;
 using Application.Common.Security.Exceptions;
-using Infrastructure.Identity.Services;
+using Domain.Authorization.Repositories;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
+using IAuthorizationService = Microsoft.AspNetCore.Authorization.IAuthorizationService;
 
 namespace Application.Common.Security.Behaviors;
 
-/// <summary>
-/// Authorization pipeline behavior'u
+//// <summary>
+/// Permission tabanlı authorization pipeline behavior'u
 /// </summary>
 public class AuthorizationBehavior<TRequest, TResponse>(
-    IAuthorizationService authorizationService,
+    IAuthorizationRepository authorizationRepository,
     ICurrentUserService currentUserService,
     ILogger<AuthorizationBehavior<TRequest, TResponse>> logger)
     : IPipelineBehavior<TRequest, TResponse>
@@ -22,87 +25,72 @@ public class AuthorizationBehavior<TRequest, TResponse>(
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        // Request'in attribute'larını kontrol et
-        var authorizeAttributes = request.GetType()
-            .GetCustomAttributes<AuthorizeAttribute>();
+        // Permission ve resource attribute'larını kontrol et
+        var attributes = request.GetType().GetCustomAttributes()
+            .Where(a => a is RequirePermissionAttribute or ResourceAuthorizationAttribute)
+            .ToArray();
 
-        var attributes = authorizeAttributes as AuthorizeAttribute[] ?? authorizeAttributes.ToArray();
-        if (attributes.Length != 0)
+        if (attributes.Length == 0)
         {
-            // Kullanıcı kontrolü
-            if (currentUserService.UserId == null)
-            {
-                logger.LogWarning("Unauthorized access attempt to {RequestType}", typeof(TRequest).Name);
-                throw new UnauthorizedAccessException();
-            }
-
-            // Her bir attribute için yetki kontrolü yap
-            foreach (var attribute in attributes)
-            {
-                var policy = attribute.Policy;
-                if (!string.IsNullOrEmpty(policy))
-                {
-                    var authorized = await EvaluatePolicyAsync(policy);
-                    if (!authorized)
-                    {
-                        logger.LogWarning(
-                            "User {UserId} not authorized for policy {Policy} on {RequestType}",
-                            currentUserService.UserId,
-                            policy,
-                            typeof(TRequest).Name);
-                        throw new ForbiddenAccessException();
-                    }
-                }
-
-                var roles = attribute.Roles?.Split(',');
-                if (roles?.Any() == true)
-                {
-                    var authorized = await EvaluateRolesAsync(roles);
-                    if (!authorized)
-                    {
-                        logger.LogWarning(
-                            "User {UserId} does not have required roles {Roles} for {RequestType}",
-                            currentUserService.UserId,
-                            string.Join(", ", roles),
-                            typeof(TRequest).Name);
-                        throw new ForbiddenAccessException();
-                    }
-                }
-            }
-
-            logger.LogInformation(
-                "User {UserId} authorized for {RequestType}",
-                currentUserService.UserId,
-                typeof(TRequest).Name);
+            return await next();
         }
 
-        // Pipeline'a devam et
+        // Kullanıcı kontrolü
+        if (currentUserService.UserId == null)
+        {
+            logger.LogWarning("Unauthorized access attempt to {RequestType}", typeof(TRequest).Name);
+            throw new UnauthorizedAccessException();
+        }
+
+        foreach (var attribute in attributes)
+        {
+            bool isAuthorized = attribute switch
+            {
+                RequirePermissionAttribute permissionAttr => 
+                    await CheckPermissionAsync(permissionAttr),
+                
+                ResourceAuthorizationAttribute resourceAttr => 
+                    await CheckResourceAccessAsync(resourceAttr),
+                
+                _ => false
+            };
+
+            if (!isAuthorized)
+            {
+                logger.LogWarning(
+                    "User {UserId} not authorized for {AttributeType} on {RequestType}",
+                    currentUserService.UserId,
+                    attribute.GetType().Name,
+                    typeof(TRequest).Name);
+                
+                throw new ForbiddenAccessException();
+            }
+        }
+
+        logger.LogInformation(
+            "User {UserId} authorized for {RequestType}",
+            currentUserService.UserId,
+            typeof(TRequest).Name);
+
         return await next();
     }
 
-    private async Task<bool> EvaluatePolicyAsync(string policy)
+    private async Task<bool> CheckPermissionAsync(RequirePermissionAttribute attribute)
     {
-        var result = await authorizationService.AuthorizeAsync(
-            currentUserService.User,
-            null,
-            policy);
+        var requiredPermissions = attribute.ToString()
+            .Split('_')[1] // "Permission_X,Y,Z" formatından permission'ları al
+            .Split(',');
 
-        return result.Succeeded;
+        return await authorizationRepository.HasAnyPermissionAsync(
+            currentUserService.UserId!, 
+            requiredPermissions);
     }
 
-    private async Task<bool> EvaluateRolesAsync(string[] roles)
+    private async Task<bool> CheckResourceAccessAsync(ResourceAuthorizationAttribute attribute)
     {
-        foreach (var role in roles)
-        {
-            var result = await authorizationService.AuthorizeAsync(
-                currentUserService.User,
-                null,
-                $"Role_{role.Trim()}");
-
-            if (result.Succeeded)
-                return true;
-        }
-
-        return false;
+        return await authorizationRepository.CanAccessResourceAsync(
+            currentUserService.UserId!,
+            attribute.ToString().Split('_')[1], // Resource adı
+            attribute.ToString().Split('_')[2]); // Operation adı
     }
 }

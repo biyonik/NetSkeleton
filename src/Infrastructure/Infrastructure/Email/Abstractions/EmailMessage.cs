@@ -8,17 +8,17 @@ public class EmailMessage
     /// <summary>
     /// Alıcı email adresleri
     /// </summary>
-    public List<string> To { get; set; } = new();
+    public List<string> To { get; set; } = [];
 
     /// <summary>
     /// CC email adresleri
     /// </summary>
-    public List<string> Cc { get; set; } = new();
+    public List<string> Cc { get; set; } = [];
 
     /// <summary>
     /// BCC email adresleri
     /// </summary>
-    public List<string> Bcc { get; set; } = new();
+    public List<string> Bcc { get; set; } = [];
 
     /// <summary>
     /// Email konusu
@@ -38,5 +38,5 @@ public class EmailMessage
     /// <summary>
     /// Ekler
     /// </summary>
-    public List<EmailAttachment> Attachments { get; set; } = new();
+    public List<EmailAttachment> Attachments { get; set; } = [];
 }

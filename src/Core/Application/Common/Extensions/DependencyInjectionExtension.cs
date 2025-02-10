@@ -1,5 +1,6 @@
 using System.Reflection;
 using Application.Common.Aspects;
+using Application.Common.Validators;
 using Autofac;
 using Autofac.Extras.DynamicProxy;
 using MediatR;
@@ -10,12 +11,15 @@ namespace Application.Common.Extensions;
 
 public static class DependencyInjectionExtensions
 {
-    public static IServiceCollection AddApplicationServices(this IServiceCollection services)
+    public static IServiceCollection AddApplicationLayer(this IServiceCollection services)
     {
         // Http context accessor
         services.AddHttpContextAccessor();
 
         // MediatR ve diğer servisler...
+        services.AddScoped<IPasswordValidator, PasswordValidator>();
+
+
         
         // Service tool için service provider oluştur
         ServiceTool.Create(services);
